@@ -1,0 +1,37 @@
+* Fraud_test_data:
+Epoch [1/1] Loss: 0.0010 | Accuracy: 0.9998
+Threshold: 0.10 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.20 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.30 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.40 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.50 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.60 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.70 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.80 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.90 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 1.0000 | F1: 1.0000 | AUC: 1.0000
+Threshold: 0.9999999 | Accuracy: 1.0000 | Precision: 1.0000 | Recall: 0.9981 | F1: 0.9991 | AUC: 0.9991
+Min Prob: [3.060768e-11] | Max Prob: [1.]
+* Modified_data:
+Epoch [1/1] Loss: 0.0008 | Accuracy: 0.9999
+Threshold: 0.10 | Accuracy: 0.9967 | Precision: 0.9935 | Recall: 0.7041 | F1: 0.8241 | AUC: 0.8520
+Threshold: 0.20 | Accuracy: 0.9964 | Precision: 0.9984 | Recall: 0.6747 | F1: 0.8052 | AUC: 0.8373
+Threshold: 0.30 | Accuracy: 0.9962 | Precision: 0.9991 | Recall: 0.6566 | F1: 0.7924 | AUC: 0.8283
+Threshold: 0.40 | Accuracy: 0.9960 | Precision: 0.9996 | Recall: 0.6423 | F1: 0.7820 | AUC: 0.8211
+Threshold: 0.50 | Accuracy: 0.9959 | Precision: 0.9997 | Recall: 0.6304 | F1: 0.7732 | AUC: 0.8152
+Threshold: 0.60 | Accuracy: 0.9958 | Precision: 0.9998 | Recall: 0.6193 | F1: 0.7649 | AUC: 0.8097
+Threshold: 0.70 | Accuracy: 0.9957 | Precision: 0.9999 | Recall: 0.6091 | F1: 0.7570 | AUC: 0.8045
+Threshold: 0.80 | Accuracy: 0.9955 | Precision: 0.9999 | Recall: 0.5966 | F1: 0.7473 | AUC: 0.7983
+Threshold: 0.90 | Accuracy: 0.9954 | Precision: 1.0000 | Recall: 0.5819 | F1: 0.7357 | AUC: 0.7909
+Threshold: 0.9999999 | Accuracy: 0.9892 | Precision: 1.0000 | Recall: 0.0234 | F1: 0.0457 | AUC: 0.5117
+Min Prob: [5.386746e-10] | Max Prob: [1.]
+* Enorm_data:
+Epoch [1/1] Loss: 0.0010 | Accuracy: 0.9998
+Threshold: 0.10 | Accuracy: 0.9810 | Precision: 0.2240 | Recall: 1.0000 | F1: 0.3660 | AUC: 0.9904
+Threshold: 0.20 | Accuracy: 0.9843 | Precision: 0.2585 | Recall: 1.0000 | F1: 0.4108 | AUC: 0.9921
+Threshold: 0.30 | Accuracy: 0.9871 | Precision: 0.2985 | Recall: 1.0000 | F1: 0.4598 | AUC: 0.9935
+Threshold: 0.40 | Accuracy: 0.9894 | Precision: 0.3412 | Recall: 1.0000 | F1: 0.5088 | AUC: 0.9947
+Threshold: 0.50 | Accuracy: 0.9915 | Precision: 0.3921 | Recall: 1.0000 | F1: 0.5633 | AUC: 0.9957
+Threshold: 0.60 | Accuracy: 0.9931 | Precision: 0.4428 | Recall: 1.0000 | F1: 0.6138 | AUC: 0.9965
+Threshold: 0.70 | Accuracy: 0.9941 | Precision: 0.4803 | Recall: 1.0000 | F1: 0.6489 | AUC: 0.9970
+Threshold: 0.80 | Accuracy: 0.9949 | Precision: 0.5179 | Recall: 1.0000 | F1: 0.6824 | AUC: 0.9974
+Threshold: 0.90 | Accuracy: 0.9977 | Precision: 0.7023 | Recall: 1.0000 | F1: 0.8251 | AUC: 0.9988
