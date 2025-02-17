@@ -4,7 +4,7 @@
 This project explores multiple methods for detecting fraudulent credit card transactions. The goal is to implement, compare, and evaluate various methods.
 
 ## Dataset
-We utilize a [public dataset]()  (To be updated!)
+We utilize a [public dataset](https://www.kaggle.com/datasets/kartik2112/fraud-detection)
 
 ## Methods
 
