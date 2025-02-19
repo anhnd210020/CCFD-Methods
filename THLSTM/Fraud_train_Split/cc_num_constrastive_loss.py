@@ -12,56 +12,93 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from tqdm import tqdm
 
 # ------------------------------
+# Contrastive Loss Function with Multiple Metrics
+# ------------------------------
+def contrastive_loss(embeddings, labels, margin=1.0, similarity_metric='euclid', cosine_weight=0.5):
+    """
+    Computes the contrastive loss using either Euclidean, cosine, or a combination of both distances.
+    
+    For a pair of examples (i, j):
+      L = 0.5 * (similarity) * D^2 + 0.5 * (1 - similarity) * max(0, margin - D)^2
+      
+    where similarity = 1 if labels are the same, and 0 otherwise.
+    
+    Args:
+        embeddings (Tensor): shape (batch_size, embedding_dim)
+        labels (Tensor): shape (batch_size, 1) or (batch_size,) with binary labels (0 or 1)
+        margin (float): margin for dissimilar pairs.
+        similarity_metric (str): one of 'euclid', 'cosine', or 'both'. Determines which distance metric to use.
+        cosine_weight (float): weight applied to the cosine distance when using the 'both' option.
+        
+    Returns:
+        Tensor: the contrastive loss value.
+    """
+    batch_size = embeddings.size(0)
+    
+    # Compute pairwise Euclidean distances
+    diff = embeddings.unsqueeze(1) - embeddings.unsqueeze(0)  # shape: (batch_size, batch_size, embedding_dim)
+    euclid_distances = torch.norm(diff, p=2, dim=2)  # shape: (batch_size, batch_size)
+    
+    # Compute pairwise Cosine distances
+    normalized_embeddings = embeddings / (embeddings.norm(dim=1, keepdim=True) + 1e-8)
+    cosine_sim = torch.mm(normalized_embeddings, normalized_embeddings.t())  # similarity in [-1,1]
+    cosine_distances = 1 - cosine_sim  # transform similarity into a distance measure
+
+    # Store both metrics in a dictionary if needed
+    metrics = {'euclid': euclid_distances, 'cosine': cosine_distances}
+    
+    # Select the distance measure based on the similarity_metric parameter
+    if similarity_metric == 'euclid':
+        distances = euclid_distances
+    elif similarity_metric == 'cosine':
+        distances = cosine_distances
+    elif similarity_metric == 'both':
+        distances = (euclid_distances + cosine_weight * cosine_distances) / (1 + cosine_weight)
+    else:
+        raise ValueError("Invalid similarity_metric. Choose among 'euclid', 'cosine', or 'both'.")
+    
+    # Create similarity matrix: 1 if labels are the same, 0 otherwise.
+    labels = labels.view(-1, 1)
+    label_matrix = (labels == labels.t()).float()  # shape: (batch_size, batch_size)
+    
+    # Remove self-comparisons (diagonal elements)
+    mask = torch.eye(batch_size, device=embeddings.device).bool()
+    distances = distances[~mask].view(batch_size, -1)
+    label_matrix = label_matrix[~mask].view(batch_size, -1)
+    
+    # Calculate contrastive loss
+    loss_similar = label_matrix * distances**2
+    loss_dissimilar = (1 - label_matrix) * torch.clamp(margin - distances, min=0)**2
+    loss = 0.5 * (loss_similar + loss_dissimilar)
+    return loss.mean()
+
+# ------------------------------
 # Dataset Definition
 # ------------------------------
 class CreditCardFraudDataset(torch.utils.data.Dataset):
     def __init__(self, file_path, seq_len):
         self.data = pd.read_csv(file_path)
-        # Convert transaction time to datetime and sort by cc_num and time
-        self.data['trans_date_trans_time'] = pd.to_datetime(self.data['trans_date_trans_time'])
-        self.data.sort_values(['cc_num', 'trans_date_trans_time'], inplace=True)
-        # Convert back to timestamp for numerical processing
-        self.data['trans_date_trans_time'] = self.data['trans_date_trans_time'].apply(lambda x: x.timestamp())
-        
-        # Encode and scale features
+        self.data['trans_date_trans_time'] = pd.to_datetime(self.data['trans_date_trans_time']).apply(lambda x: x.timestamp())
         self.label_encoder = LabelEncoder()
         self.data['category'] = self.label_encoder.fit_transform(self.data['category'])
         scaler = MinMaxScaler()
         self.data[['amt']] = scaler.fit_transform(self.data[['amt']])
-        
         self.seq_len = seq_len
         self.sequences = []
-        
-        # Group by credit card number
         grouped = self.data.groupby('cc_num')
-        for cc, group in grouped:
-            # Ensure each group is sorted by time (already sorted overall but we do it per group for safety)
-            group = group.sort_values('trans_date_trans_time')
-            group_values = group[['category', 'amt', 'is_fraud', 'trans_date_trans_time']].values
-            
-            # Build sliding windows for each transaction in the group
-            for i in range(len(group_values)):
+        for _, group in grouped:
+            group = group[['category', 'amt', 'is_fraud', 'trans_date_trans_time']].values
+            for i in range(len(group)):
                 if i < self.seq_len - 1:
-                    # For early transactions, pad the sequence with the first transaction
-                    padding = [group_values[0]] * (self.seq_len - i - 1)
-                    seq = padding + group_values[:i+1].tolist()
+                    padding = [group[0]] * (self.seq_len - i - 1)
+                    seq = padding + group[:i+1].tolist()
                 else:
-                    # Use the last seq_len transactions
-                    seq = group_values[i - self.seq_len + 1 : i + 1].tolist()
-                
-                # The target label is the fraud flag of the last transaction in the sequence.
-                label = group_values[i, 2]
-                
-                # Compute time intervals between transactions in the sequence.
-                times = [s[-1] for s in seq]
-                time_intervals = np.diff(times, prepend=times[0])
+                    seq = group[i - self.seq_len + 1 : i + 1].tolist()
+                label = group[i, 2]
+                time_intervals = np.diff([s[-1] for s in seq], prepend=seq[0][-1])
                 time_intervals = time_intervals.reshape(-1, 1)
-                
-                # Extract the first two features (category and amt) from each transaction
                 seq_features = np.array([s[:2] for s in seq])
-                # Concatenate time intervals as an extra feature
                 seq_features = np.concatenate((seq_features, time_intervals), axis=1)
-                
                 self.sequences.append((seq_features, label))
     
     def __len__(self):
@@ -69,9 +106,6 @@ class CreditCardFraudDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         x_seq, y_label = self.sequences[idx]
-        # x_seq is a [seq_len x 3] tensor where the 3 columns correspond to:
-        # [category, amt, time_interval]
-        # y_label is the fraud flag for the last transaction in the sequence.
         return torch.tensor(x_seq, dtype=torch.float32), torch.tensor(y_label, dtype=torch.float32)
 
 # ------------------------------
@@ -167,20 +201,24 @@ class TH_LSTM(nn.Module):
         e_t = torch.sum(alpha_t_i.unsqueeze(-1) * historical_states, dim=1)
         h_t = torch.tanh(self.W_h(h_tilde_t) + self.We(e_t) + self.Wg(X_seq[:, -1, :-1]) + self.bh)
         y_pred = torch.sigmoid(self.classifier(h_t))
-        return y_pred
+        return y_pred, h_t  # Return both the prediction and the embedding
+
 # ------------------------------
 # Main Training and Evaluation
 # ------------------------------
 def main():
-    # Chọn thiết bị chạy (GPU nếu có, nếu không dùng CPU)
+    # Choose device (GPU if available, else CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     batch_size = 32
     input_dim = 2
     hidden_dim = 64
     memory_size = 10
-    seq_len = 20
+    seq_len = 5
     epochs = 10
+    contrastive_weight = 0.1  # Hyperparameter to balance contrastive loss
+    similarity_metric = 'both'  # 'euclid', 'cosine', or 'both'
+    cosine_weight = 0.5  # Only used if similarity_metric == 'both'
     
     train_file = "/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/Fraud_Train/fraudTraincc_num.csv"
     test_file  = "/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/Fraud_Train/fraudTestcc_num.csv"
@@ -188,7 +226,7 @@ def main():
     train_dataset = CreditCardFraudDataset(train_file, seq_len=seq_len)
     test_dataset  = CreditCardFraudDataset(test_file, seq_len=seq_len)
     
-    train_loader  = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    train_loader  = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader   = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
     model = TH_LSTM(input_dim=input_dim, hidden_dim=hidden_dim, memory_size=memory_size).to(device)
@@ -206,50 +244,66 @@ def main():
             X_batch = X_batch.to(device)
             y_batch = y_batch.view(-1, 1).to(device)
             optimizer.zero_grad()
-            y_pred = model(X_batch)
-            loss = criterion(y_pred, y_batch)
+            
+            # Get both prediction and embedding from the model
+            y_pred, embeddings = model(X_batch)
+            
+            # Compute classification loss
+            loss_cls = criterion(y_pred, y_batch)
+            # Compute contrastive loss using the embeddings and true labels with the selected metric
+            loss_ctr = contrastive_loss(embeddings, y_batch, margin=1.0, 
+                                        similarity_metric=similarity_metric, cosine_weight=cosine_weight)
+            # Total loss: classification loss + weighted contrastive loss
+            loss = loss_cls + contrastive_weight * loss_ctr
+            
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
         
-        # Đánh giá trên tập test
+        # Evaluation on the test set
         model.eval()
         y_true_test, y_pred_test, y_pred_test_prob = [], [], []
         with torch.no_grad():
             for X_batch, y_batch in test_loader:
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.view(-1, 1).to(device)
-                y_pred = model(X_batch)
+                y_pred, _ = model(X_batch)  # embeddings not needed for evaluation
                 y_true_test.extend(y_batch.cpu().numpy())
                 y_pred_test_prob.extend(y_pred.cpu().numpy())
                 y_pred_test.extend((y_pred.cpu().numpy() >= 0.5).astype(int))
         
         test_acc = accuracy_score(y_true_test, y_pred_test)
+        test_precision = precision_score(y_true_test, y_pred_test, zero_division=0)
+        test_recall = recall_score(y_true_test, y_pred_test, zero_division=0)
         test_f1  = f1_score(y_true_test, y_pred_test, zero_division=0)
         test_auc = roc_auc_score(y_true_test, y_pred_test_prob)
         
         print(f"\nEpoch {epoch+1} Test Results:")
-        print(f"   Accuracy: {test_acc:.4f}")
-        print(f"   F1 Score: {test_f1:.4f}")
-        print(f"   AUC: {test_auc:.4f}")
+        print(f"   Accuracy : {test_acc:.4f}")
+        print(f"   Precision: {test_precision:.4f}")
+        print(f"   Recall   : {test_recall:.4f}")
+        print(f"   F1 Score : {test_f1:.4f}")
+        print(f"   AUC      : {test_auc:.4f}")
         
-        # Lưu checkpoint tốt nhất
+        # Save the best checkpoint (you can choose your own criteria)
         if test_f1 + test_auc > best_score:
             best_score = test_f1 + test_auc
             best_checkpoint = {
                 "epoch": epoch+1,
                 "test_accuracy": test_acc,
+                "test_precision": test_precision,
+                "test_recall": test_recall,
                 "test_f1": test_f1,
                 "test_auc": test_auc
             }
             with open("/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/best_checkpoint_results_cc_num.json", "w") as f:
                 json.dump(best_checkpoint, f, indent=4)
-            print(f"New best checkpoint saved!")
+            print("New best checkpoint saved!")
 
-    # Lưu mô hình tốt nhất
+    # Save the best model
     if best_checkpoint:
         torch.save(model.state_dict(), "/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/best_model_cc_num.pth")
-        print(f"Best model saved!")
+        print("Best model saved!")
 
 if __name__ == "__main__":
     main()

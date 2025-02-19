@@ -168,18 +168,19 @@ class TH_LSTM(nn.Module):
         h_t = torch.tanh(self.W_h(h_tilde_t) + self.We(e_t) + self.Wg(X_seq[:, -1, :-1]) + self.bh)
         y_pred = torch.sigmoid(self.classifier(h_t))
         return y_pred
+
 # ------------------------------
 # Main Training and Evaluation
 # ------------------------------
 def main():
-    # Chọn thiết bị chạy (GPU nếu có, nếu không dùng CPU)
+    # Choose device (GPU if available, else CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     batch_size = 32
     input_dim = 2
     hidden_dim = 64
     memory_size = 10
-    seq_len = 20
+    seq_len = 50
     epochs = 10
     
     train_file = "/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/Fraud_Train/fraudTraincc_num.csv"
@@ -212,7 +213,7 @@ def main():
             optimizer.step()
             total_loss += loss.item()
         
-        # Đánh giá trên tập test
+        # Evaluate on test set
         model.eval()
         y_true_test, y_pred_test, y_pred_test_prob = [], [], []
         with torch.no_grad():
@@ -225,31 +226,37 @@ def main():
                 y_pred_test.extend((y_pred.cpu().numpy() >= 0.5).astype(int))
         
         test_acc = accuracy_score(y_true_test, y_pred_test)
+        test_precision = precision_score(y_true_test, y_pred_test, zero_division=0)
+        test_recall = recall_score(y_true_test, y_pred_test, zero_division=0)
         test_f1  = f1_score(y_true_test, y_pred_test, zero_division=0)
         test_auc = roc_auc_score(y_true_test, y_pred_test_prob)
         
         print(f"\nEpoch {epoch+1} Test Results:")
-        print(f"   Accuracy: {test_acc:.4f}")
-        print(f"   F1 Score: {test_f1:.4f}")
-        print(f"   AUC: {test_auc:.4f}")
+        print(f"   Accuracy : {test_acc:.4f}")
+        print(f"   Precision: {test_precision:.4f}")
+        print(f"   Recall   : {test_recall:.4f}")
+        print(f"   F1 Score : {test_f1:.4f}")
+        print(f"   AUC      : {test_auc:.4f}")
         
-        # Lưu checkpoint tốt nhất
+        # Save best checkpoint (using test_f1 + test_auc as metric)
         if test_f1 + test_auc > best_score:
             best_score = test_f1 + test_auc
             best_checkpoint = {
                 "epoch": epoch+1,
                 "test_accuracy": test_acc,
+                "test_precision": test_precision,
+                "test_recall": test_recall,
                 "test_f1": test_f1,
                 "test_auc": test_auc
             }
             with open("/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/best_checkpoint_results_cc_num.json", "w") as f:
                 json.dump(best_checkpoint, f, indent=4)
-            print(f"New best checkpoint saved!")
+            print("New best checkpoint saved!")
 
-    # Lưu mô hình tốt nhất
+    # Save best model
     if best_checkpoint:
         torch.save(model.state_dict(), "/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/best_model_cc_num.pth")
-        print(f"Best model saved!")
+        print("Best model saved!")
 
 if __name__ == "__main__":
     main()

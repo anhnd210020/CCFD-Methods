@@ -1,6 +1,8 @@
 {
-    "epoch": 2,
+    "epoch": 3,
     "test_accuracy": 0.9941330968380121,
+    "test_precision": 0.0,
+    "test_recall": 0.0,
     "test_f1": 0.0,
-    "test_auc": 0.7052558989680386
+    "test_auc": 0.6374641120139105
 }
