@@ -161,7 +161,7 @@ def main():
     train_dataset = CreditCardFraudDataset(train_file, seq_len=seq_len)
     test_dataset  = CreditCardFraudDataset(test_file, seq_len=seq_len)
     
-    train_loader  = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader  = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
     test_loader   = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
     model = TH_LSTM(input_dim=input_dim, hidden_dim=hidden_dim, memory_size=memory_size).to(device)

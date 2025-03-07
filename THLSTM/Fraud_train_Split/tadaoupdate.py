@@ -180,7 +180,7 @@ def main():
     input_dim = 2
     hidden_dim = 64
     memory_size = 10
-    seq_len = 50
+    seq_len = 10
     epochs = 10
     
     train_file = "/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/Fraud_Train/fraudTraincc_num.csv"
@@ -249,14 +249,9 @@ def main():
                 "test_f1": test_f1,
                 "test_auc": test_auc
             }
-            with open("/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/best_checkpoint_results_cc_num.json", "w") as f:
+            with open("/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/tadao_best_checkpoint_results_cc_num.json", "w") as f:
                 json.dump(best_checkpoint, f, indent=4)
             print("New best checkpoint saved!")
-
-    # Save best model
-    if best_checkpoint:
-        torch.save(model.state_dict(), "/home/ducanh/Credit Card Transactions Fraud Detection/THLSTM/Fraud_train_Split/best_model_cc_num.pth")
-        print("Best model saved!")
 
 if __name__ == "__main__":
     main()

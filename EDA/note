@@ -1,0 +1,30 @@
+Dùng hết các features , lập bảng so sánh các model => Features selection => Features extraction PCA => Sequential để cải thiện lên
+
+Thử bài AAAI 2023
+
+federated learning
+
+6/3/2025: 
+- Apply sequence in RF
+=>Test Best Threshold: 0.2000
+Test Best Accuracy: 0.9983
+Test Best Precision: 0.8696
+Test Best Recall: 0.7849
+Test Best F1 Score: 0.8251
+Test Best ROC_AUC Score: 0.9858
+- Change seq_length = 10, 20, 50, 100
+- Ensemble learning: XGBoost, ADABoost, MofExpert, Expert warehouse
+- GRU with seq = 1
+=> Best Threshold (Test): 0.4000
+Best Accuracy (Test): 0.9984
+Best Precision (Test): 0.9093
+Best Recall (Test): 0.7677
+Best F1 Score (Test): 0.8325
+Best ROC_AUC Score (Test): 0.9972
+- Test DNN 
+- Thử lại công thức TH-LSTM, delta T (bình phương, trị tuyệt đối)
+- Trực quan hóa dữ liệu, bóc tách những thằng gian lận.
+- Vẽ những ô gian lận nhiều nhất
+7/3/2025:
+- MLP, Mạng KAN
+- LLM
