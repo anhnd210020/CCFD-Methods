@@ -65,7 +65,6 @@ df['trans_date_trans_time'] = df['trans_date_trans_time'].apply(lambda x: x.time
 
 # =============================================================================
 # 2️⃣ Train_test_split
-# =============================================================================
 
 train, test = train_test_split(df, test_size=0.33, random_state=42, stratify=df['is_fraud'])
 print("Train shape:", train.shape)
