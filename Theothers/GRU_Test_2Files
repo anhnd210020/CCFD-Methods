@@ -143,7 +143,7 @@ model.to(device)
 num_epochs = 20
 train_model(model, train_loader, criterion, optimizer, num_epochs, device)
 
-# %% Dự đoán và đánh giá mô hình
+
 model.eval()
 y_pred_train_proba = []
 with torch.no_grad():
