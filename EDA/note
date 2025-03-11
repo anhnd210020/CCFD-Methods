@@ -146,7 +146,13 @@ Best Precision (Test): 0.9093
 Best Recall (Test): 0.7677
 Best F1 Score (Test): 0.8325
 Best ROC_AUC Score (Test): 0.9972
-- Test DNN 
+- Test DNN:
+Best Threshold (Test): 0.1000
+Best Accuracy (Test): 0.9968
+Best Precision (Test): 0.7226
+Best Recall (Test): 0.6242
+Best F1 Score (Test): 0.6698
+Best ROC_AUC Score (Test): 0.9659
 - Thử lại công thức TH-LSTM, delta T (bình phương, trị tuyệt đối)
 - Trực quan hóa dữ liệu, bóc tách những thằng gian lận.
 - Vẽ những ô gian lận nhiều nhất

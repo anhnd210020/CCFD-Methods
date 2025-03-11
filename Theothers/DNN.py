@@ -11,7 +11,6 @@ from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_sco
 from sklearn.metrics import confusion_matrix
 
 # %%
-
 df = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_data.csv')
 
 # Xử lý thời gian
@@ -100,7 +99,7 @@ X_train_sc = pd.DataFrame(data=X_train_sc, columns=X_train.columns)
 X_test_sc = pd.DataFrame(data=X_test_sc, columns=X_test.columns)
 
 # %%
-sequence_length = 1000  # Số giao dịch cần trong 1 sequence
+sequence_length = 30  # Số giao dịch cần trong 1 sequence
 
 def create_sequences_predict_all(df, sequence_length):
     sequences, labels = [], []
@@ -163,20 +162,40 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 # =============================================================================
-# 6. Xây dựng mô hình GRU
+# 6. Xây dựng mô hình DNN
 # =============================================================================
-class FraudGRU(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers):
-        super(FraudGRU, self).__init__()
-        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
-        self.sigmoid = nn.Sigmoid()
+# Với DNN, đầu vào của mô hình là vector phẳng, do đó ta flatten sequence
+class FraudDNN(nn.Module):
+    def __init__(self, input_dim):
+        super(FraudDNN, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 1),
+            nn.Sigmoid()
+        )
     
     def forward(self, x):
-        out, _ = self.gru(x)
-        # Lấy trạng thái ẩn của bước thờyi gian cuối cùng
-        out = self.fc(out[:, -1, :])
-        return self.sigmoid(out)
+        # x shape: (batch_size, sequence_length, num_features)
+        batch_size = x.shape[0]
+        x = x.view(batch_size, -1)  # flatten sequence thành vector 1 chiều
+        out = self.model(x)
+        return out
+
+# Xác định input_dim dựa trên sequence_length và số features (sau khi drop cc_num và is_fraud)
+num_features = X_train_seq.shape[2]  # số feature
+input_dim = sequence_length * num_features
+
+model = FraudDNN(input_dim)
+
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
 
 # %%
 def train_model(model, train_loader, criterion, optimizer, num_epochs, device):
@@ -196,16 +215,6 @@ def train_model(model, train_loader, criterion, optimizer, num_epochs, device):
         average_loss = total_loss / len(train_loader)
         print(f'Epoch {epoch + 1}, Loss: {average_loss:.4f}')
 
-input_size = X_train_seq.shape[2]  # số feature (sau khi loại bỏ cc_num)
-hidden_size = 64
-num_layers = 2
-model = FraudGRU(input_size, hidden_size, num_layers)
-
-criterion = nn.BCELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-
 num_epochs = 20
 train_model(model, train_loader, criterion, optimizer, num_epochs, device)
 
@@ -221,7 +230,7 @@ with torch.no_grad():
         y_pred_train_proba.extend(outputs)
 y_pred_train_proba = np.array(y_pred_train_proba)
 
-# --- 2. Lấy predicted probabilities cho tập test ---
+# --- Lấy predicted probabilities cho tập test ---
 y_pred_test_proba = []
 with torch.no_grad():
     for X_batch, y_batch in test_loader:
@@ -230,8 +239,7 @@ with torch.no_grad():
         y_pred_test_proba.extend(outputs)
 y_pred_test_proba = np.array(y_pred_test_proba)
 
-# --- 3. Tạo DataFrame kết quả cho train và test ---
-# Lưu ý: ở đây chúng ta dùng y_train_seq và y_test_seq (là nhãn của sequence)
+# --- Tạo DataFrame kết quả cho train và test ---
 y_train_results = pd.DataFrame(y_pred_train_proba, columns=['pred_fraud'])
 y_train_results['pred_not_fraud'] = 1 - y_train_results['pred_fraud']
 y_train_results['y_train_actual'] = y_train_seq  # y_train_seq là nhãn thực của các sequence
@@ -240,15 +248,13 @@ y_test_results = pd.DataFrame(y_pred_test_proba, columns=['pred_fraud'])
 y_test_results['pred_not_fraud'] = 1 - y_test_results['pred_fraud']
 y_test_results['y_test_actual'] = y_test_seq
 
-# --- 4. Đánh giá với các ngưỡng khác nhau ---
+# --- Đánh giá với các ngưỡng khác nhau ---
 numbers = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-for i in numbers:
-    y_train_results[i] = y_train_results['pred_fraud'].map(lambda x: 1 if x > i else 0)
-    y_test_results[i] = y_test_results['pred_fraud'].map(lambda x: 1 if x > i else 0)
-
 cutoff_df = pd.DataFrame(columns=['Threshold', 'Accuracy', 'precision_score', 'recall_score', 'F1_score'])
 
-# %%
+for i in numbers:
+    y_train_results[i] = y_train_results['pred_fraud'].map(lambda x: 1 if x > i else 0)
+    
 for i in numbers:
     cm1 = confusion_matrix(y_train_results['y_train_actual'], y_train_results[i])
     TP, FP, FN, TN = cm1[1,1], cm1[0,1], cm1[1,0], cm1[0,0]
@@ -276,8 +282,10 @@ print(f'Best Recall (Train): {best_recall:.4f}')
 print(f'Best F1 Score (Train): {best_f1_score:.4f}')
 print(f'Best ROC_AUC Score (Train): {best_auc:.4f}')
 
-# %%
 cutoff_df_test = pd.DataFrame(columns=['Threshold', 'Accuracy', 'precision_score', 'recall_score', 'F1_score'])
+for i in numbers:
+    y_test_results[i] = y_test_results['pred_fraud'].map(lambda x: 1 if x > i else 0)
+    
 for i in numbers:
     cm1 = confusion_matrix(y_test_results['y_test_actual'], y_test_results[i])
     TP, FP, FN, TN = cm1[1,1], cm1[0,1], cm1[1,0], cm1[0,0]
