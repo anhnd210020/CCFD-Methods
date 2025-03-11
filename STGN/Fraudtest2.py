@@ -216,7 +216,6 @@ def main():
         torch.save(model.state_dict(), model_path)
         print("Best model saved!")
 
-
 if __name__ == "__main__":
     main()
 
