@@ -97,7 +97,7 @@ X_train_sc = pd.DataFrame(data=X_train_sc, columns=X_train.columns)
 X_test_sc = pd.DataFrame(data=X_test_sc, columns=X_test.columns)
 
 # %%
-sequence_length = 10  # Số giao dịch cần trong 1 sequence
+sequence_length = 1000  # Số giao dịch cần trong 1 sequence
 
 def create_sequences_predict_all(df, sequence_length):
     sequences, labels = [], []

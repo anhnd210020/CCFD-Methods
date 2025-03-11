@@ -10,10 +10,12 @@ from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_sco
 from sklearn.model_selection import train_test_split  # nếu cần dùng sau này
 import warnings
 warnings.filterwarnings('ignore')
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 # %% Đọc dữ liệu riêng biệt cho Train và Test
 df_train = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_fraudTrain.csv')
 df_test = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_fraudTest.csv')
-
 
 # %% Tách features và nhãn cho từng tập
 y_train = df_train['is_fraud']
@@ -143,11 +145,11 @@ model.to(device)
 num_epochs = 20
 train_model(model, train_loader, criterion, optimizer, num_epochs, device)
 
-
+# %% Dự đoán và đánh giá mô hình
 model.eval()
 y_pred_train_proba = []
 with torch.no_grad():
-    for X_batch, y_batch in train_loader:
+    for X_batch, _ in train_loader:
         X_batch = X_batch.to(device)
         outputs = model(X_batch).squeeze().cpu().numpy()
         y_pred_train_proba.extend(outputs)
@@ -155,22 +157,20 @@ y_pred_train_proba = np.array(y_pred_train_proba)
 
 y_pred_test_proba = []
 with torch.no_grad():
-    for X_batch, y_batch in test_loader:
+    for X_batch, _ in test_loader:
         X_batch = X_batch.to(device)
         outputs = model(X_batch).squeeze().cpu().numpy()
         y_pred_test_proba.extend(outputs)
 y_pred_test_proba = np.array(y_pred_test_proba)
 
 # Tạo DataFrame kết quả
-y_train_results = pd.DataFrame(y_pred_train_proba, columns=['pred_fraud'])
+y_train_results = pd.DataFrame({'pred_fraud': y_pred_train_proba, 'y_train_actual': y_train_seq})
 y_train_results['pred_not_fraud'] = 1 - y_train_results['pred_fraud']
-y_train_results['y_train_actual'] = y_train_seq
 
-y_test_results = pd.DataFrame(y_pred_test_proba, columns=['pred_fraud'])
+y_test_results = pd.DataFrame({'pred_fraud': y_pred_test_proba, 'y_test_actual': y_test_seq})
 y_test_results['pred_not_fraud'] = 1 - y_test_results['pred_fraud']
-y_test_results['y_test_actual'] = y_test_seq
 
-# Đánh giá theo các ngưỡng khác nhau
+# %% Đánh giá theo các ngưỡng khác nhau
 numbers = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 cutoff_df_train = pd.DataFrame(columns=['Threshold', 'Accuracy', 'precision_score', 'recall_score', 'F1_score'])
 for thresh in numbers:
@@ -211,3 +211,17 @@ best_thresh_test = cutoff_df_test.loc[best_idx_test, 'Threshold']
 best_auc_test = roc_auc_score(y_test_results['y_test_actual'], y_test_results['pred_fraud'])
 print(f'\nTest Best Threshold: {best_thresh_test:.4f}')
 print(f'Test Best ROC_AUC Score: {best_auc_test:.4f}')
+
+# %% Plot Confusion Matrix for Train Set
+print(f"Using best train threshold: {best_thresh_train:.4f}")
+# Create binary predictions on the train set based on the best threshold
+y_train_pred = y_train_results['pred_fraud'].map(lambda x: 1 if x > best_thresh_train else 0)
+# Compute the confusion matrix
+cm_train = confusion_matrix(y_train_results['y_train_actual'], y_train_pred)
+# Plot the confusion matrix using seaborn
+plt.figure(figsize=(6, 4))
+sns.heatmap(cm_train, annot=True, fmt='d', cmap='Blues', cbar=False)
+plt.xlabel("Predicted Label")
+plt.ylabel("True Label")
+plt.title(f"Confusion Matrix (Train) at Threshold {best_thresh_train:.2f}")
+plt.show()

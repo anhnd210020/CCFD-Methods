@@ -26,7 +26,7 @@ df['cust_age_groups'] = df['cust_age'].apply(lambda x: 'below 10' if x < 10 else
 # Drop các cột không cần thiết, tuy nhiên không drop 'trans_date_trans_time' và 'cc_num'
 # =============================================================================
 drop_col = ['Unnamed: 0', 'merchant', 'first', 'last', 'street', 'city', 'state', 'lat',
-            'long','dob', 'unix_time', 'cust_age', 'merch_lat', 'merch_long', 'city_pop', 'trans_num']
+            'long','dob', 'unix_time', 'cust_age', 'merch_lat', 'merch_long', 'city_pop']
 df.drop(drop_col, axis=1, inplace=True)
 
 # Pivot table cho cust_age_groups
@@ -100,7 +100,7 @@ X_train_sc = pd.DataFrame(data=X_train_sc, columns=X_train.columns)
 X_test_sc = pd.DataFrame(data=X_test_sc, columns=X_test.columns)
 
 # %%
-sequence_length = 1  # Số giao dịch cần trong 1 sequence
+sequence_length = 1000  # Số giao dịch cần trong 1 sequence
 
 def create_sequences_predict_all(df, sequence_length):
     sequences, labels = [], []
@@ -195,14 +195,6 @@ def train_model(model, train_loader, criterion, optimizer, num_epochs, device):
         
         average_loss = total_loss / len(train_loader)
         print(f'Epoch {epoch + 1}, Loss: {average_loss:.4f}')
-        
-        # Lưu checkpoint cuối cùng của epoch (last.pth)
-        torch.save(model.state_dict(), 'last.pth')
-        
-        # Nếu loss giảm, lưu checkpoint mô hình tốt nhất (best.pth)
-        if average_loss < best_loss:
-            best_loss = average_loss
-            torch.save(model.state_dict(), 'best.pth')
 
 input_size = X_train_seq.shape[2]  # số feature (sau khi loại bỏ cc_num)
 hidden_size = 64
