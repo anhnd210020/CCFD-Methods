@@ -1,8 +1,0 @@
-{
-    "epoch": 5,
-    "test_accuracy": 0.9941330968380121,
-    "test_precision": 0.0,
-    "test_recall": 0.0,
-    "test_f1": 0.0,
-    "test_auc": 0.7007969523022566
-}

@@ -1,1 +1,0 @@
-python TH-LSTM-10.py
