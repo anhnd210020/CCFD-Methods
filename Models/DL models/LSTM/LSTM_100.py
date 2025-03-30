@@ -1,5 +1,3 @@
-# %%
-# %%
 import numpy as np
 import pandas as pd
 import torch
@@ -11,7 +9,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, accuracy_score
 from sklearn.metrics import confusion_matrix
 
-# %%
 df_train = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/fraudTrain.csv')
 df_test = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/fraudTest.csv')
 df = pd.concat([df_train, df_test])
@@ -96,7 +93,6 @@ X_test_sc = sc.transform(X_test)
 X_train_sc = pd.DataFrame(data=X_train_sc, columns=X_train.columns)
 X_test_sc = pd.DataFrame(data=X_test_sc, columns=X_test.columns)
 
-# %%
 sequence_length = 100  # Số giao dịch cần trong 1 sequence
 
 def create_sequences_predict_all(df, sequence_length):

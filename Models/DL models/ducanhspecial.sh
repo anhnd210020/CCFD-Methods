@@ -1,1 +1,1 @@
-python GRU_Ideals.py
+python GRU/GRUwithprompt.py

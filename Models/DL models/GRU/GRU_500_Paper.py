@@ -121,7 +121,7 @@ def create_sequences_transactional_expansion(df, memory_size):
     
     return np.array(sequences), np.array(labels)
 
-memory_size = 500  # Chọn memory_size như một giá trị cố định (hoặc có thể thử các giá trị khác như 30, 50)
+memory_size = 600  # Chọn memory_size như một giá trị cố định (hoặc có thể thử các giá trị khác như 30, 50)
 train_seq_df = X_train_sc.copy()
 train_seq_df['is_fraud'] = y_train.values
 
@@ -277,10 +277,14 @@ hidden_size = 64
 num_layers = 2
 model = FraudGRU(input_size, hidden_size, num_layers)
 
-criterion = nn.BCELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.device_count() > 1:
+    print("Using", torch.cuda.device_count(), "GPUs for training.")
+    model = nn.DataParallel(model)
+
 model.to(device)
 
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 num_epochs = 30
 train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device)

@@ -5,6 +5,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader, random_split
 from sklearn.metrics import f1_score, roc_auc_score, accuracy_score, precision_score, recall_score
+import csv
+import random
+from tqdm import tqdm
+import os
 
 ########################################
 # Focal Loss Implementation for Imbalanced Data
@@ -12,28 +16,16 @@ from sklearn.metrics import f1_score, roc_auc_score, accuracy_score, precision_s
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2, alpha=0.25, reduction='mean'):
-        """
-        Focal loss for binary classification.
-        
-        Args:
-            gamma (float): Focusing parameter.
-            alpha (float): Weighting factor for the rare class.
-            reduction (str): Reduction method ('mean' or 'sum').
-        """
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = reduction
-    
+
     def forward(self, inputs, targets):
-        # Ensure inputs and targets are flattened.
         inputs = inputs.view(-1)
         targets = targets.view(-1)
-        # Compute binary cross entropy loss.
         BCE_loss = F.binary_cross_entropy(inputs, targets, reduction='none')
-        # Compute the probability of the true class.
         pt = torch.where(targets == 1, inputs, 1 - inputs)
-        # Compute the focal loss.
         focal_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
         if self.reduction == 'mean':
             return focal_loss.mean()
@@ -68,44 +60,20 @@ class TemporalAttention(nn.Module):
         self.lambda_t = lambda_t
 
     def forward(self, x, is_night=None):
-        """
-        x: Tensor of shape (B, T, S, F)
-        is_night: Tensor of shape (B, T) with binary indicators (0 or 1).
-                  If None, assume all values are 0.
-        """
         batch_size, T, S, F_dim = x.size()
         if is_night is None:
             is_night = torch.zeros(batch_size, T, device=x.device)
-        
-        # Step 1: Aggregate over the S dimension (e.g., averaging)
         x_temp = x.mean(dim=2)  # (B, T, F_dim)
-        
-        # Step 2: Project to hidden dimension and apply ReLU activation
         scores = F.relu(self.fc(x_temp))  # (B, T, hidden_dim)
-        
-        # Step 3: Collapse the hidden dimension to get a single score per time step
         scores = scores.mean(dim=2)       # (B, T)
-        
-        # Step 4: Scale the scores
         scores = (1 - self.lambda_t) * scores
-        
-        # Step 5: Add extra bonus for nighttime transactions.
-        beta = 1.0  # Adjust or make learnable as needed.
+        beta = 1.0  # Bonus for nighttime transactions.
         scores = scores + beta * is_night
-        
-        # Step 6: Softmax normalization over time steps
         attn_weights = F.softmax(scores, dim=1)  # (B, T)
-        
-        # Step 7: Reshape the attention weights for broadcasting
         attn_weights = attn_weights.unsqueeze(-1).unsqueeze(-1)  # (B, T, 1, 1)
-        
-        # Step 8: Weight the original input and sum over the temporal dimension
         x_attn = (x * attn_weights).sum(dim=1)  # (B, S, F_dim)
-        
-        # Optional: add an extra dimension if needed by later layers
         x_attn = x_attn.unsqueeze(1)  # (B, 1, S, F_dim)
         return x_attn
-
 
 class STAN(nn.Module):
     def __init__(self, temporal_slices, spatial_slices, feature_dim, 
@@ -123,16 +91,14 @@ class STAN(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(conv_channels * 2, 32),
             nn.ReLU(),
-            nn.Dropout(0.5),  # Added dropout for better generalization.
+            nn.Dropout(0.5),
             nn.Linear(32, 1),
             nn.Sigmoid()
         )
-    
+
     def forward(self, x):
-        # x: (B, T, S, F)
-        # Using default is_night = zeros (or modify to pass an is_night tensor if available)
         x_temp = self.temp_attn(x)  # (B, 1, S, F)
-        x_conv = x_temp.unsqueeze(2)  # (B, 1, D=1, H=S, W=F)
+        x_conv = x_temp.unsqueeze(2)  # (B, 1, 1, S, F)
         conv_out = self.conv3d(x_conv)  # (B, conv_channels*2, 1, 1, 1)
         conv_out = conv_out.view(x.size(0), -1)  # (B, conv_channels*2)
         out = self.fc(conv_out)  # (B, 1)
@@ -156,7 +122,6 @@ def evaluate_model(data_loader, model, device):
     all_outputs = np.concatenate(all_outputs)
     all_labels = np.concatenate(all_labels)
     
-    # Test fixed thresholds and choose the best based on F1
     thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     best_threshold = 0.5
     best_f1 = 0.0
@@ -172,7 +137,7 @@ def evaluate_model(data_loader, model, device):
     acc = accuracy_score(all_labels, preds)
     prec = precision_score(all_labels, preds)
     rec = recall_score(all_labels, preds)
-    combined = (f1 + auc) / 2  # Simple combined metric
+    combined = (f1 + auc) / 2  # Combined metric
     return best_threshold, f1, auc, combined, acc, prec, rec
 
 ########################################
@@ -185,7 +150,7 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
     best_epoch = -1
     epochs_without_improvement = 0
 
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs), desc="Epochs"):
         model.train()
         total_loss = 0.0
         for X_batch, y_batch in train_loader:
@@ -197,65 +162,82 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
             optimizer.step()
             total_loss += loss.item()
         average_loss = total_loss / len(train_loader)
-        print(f'\nEpoch {epoch+1}, Loss: {average_loss:.4f}')
         
-        # Evaluate on training set
-        train_threshold, train_f1, train_auc, train_combined, train_acc, train_prec, train_rec = evaluate_model(train_loader, model, device)
-        print(f"Train Metrics - Best Threshold: {train_threshold:.2f}, F1: {train_f1:.4f}, AUC: {train_auc:.4f}, Combined: {train_combined:.4f}, Accuracy: {train_acc:.4f}, Precision: {train_prec:.4f}, Recall: {train_rec:.4f}")
+        # Evaluate on train and test sets
+        _, _, _, _, _, _, _ = evaluate_model(train_loader, model, device)
+        test_threshold, test_f1, test_auc, test_combined, _, _, _ = evaluate_model(test_loader, model, device)
         
-        # Evaluate on test set
-        test_threshold, test_f1, test_auc, test_combined, test_acc, test_prec, test_rec = evaluate_model(test_loader, model, device)
-        print(f"Test Metrics  - Best Threshold: {test_threshold:.2f}, F1: {test_f1:.4f}, AUC: {test_auc:.4f}, Combined: {test_combined:.4f}, Accuracy: {test_acc:.4f}, Precision: {test_prec:.4f}, Recall: {test_rec:.4f}")
-        
-        # Update best results
         if test_combined > best_combined_metric_test:
             best_combined_metric_test = test_combined
             best_epoch = epoch + 1
             best_test_f1 = test_f1
             best_test_auc = test_auc
         
-        # Early stopping: if loss does not improve for 8 consecutive epochs
         if average_loss < best_loss:
             best_loss = average_loss
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= 8:
-                print(f'Early stopping triggered at epoch {epoch+1}')
+                print(f"Early stopping triggered at epoch {epoch+1}")
                 break
-                
-    print("\nTraining complete.")
-    print(f"Best Test Combined Metric achieved: {best_combined_metric_test:.4f} at epoch {best_epoch}")
+
+    print(f"\nBest Test Combined Metric: {best_combined_metric_test:.4f} at epoch {best_epoch}")
     print(f"Best Test F1: {best_test_f1:.4f}, Best Test AUC: {best_test_auc:.4f}")
     return best_combined_metric_test, best_epoch, best_test_f1, best_test_auc
 
 ########################################
-# Main Training Loop
+# Main Experiment Loop (Seed 37)
 ########################################
 
-if __name__ == "__main__":
-    # Device configuration
+csv_filename = 'results_seeds_1_to_100.csv'
+with open(csv_filename, mode='w', newline='') as csv_file:
+    fieldnames = ['seed', 'best_combined_metric', 'best_epoch', 'best_test_f1', 'best_test_auc']
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    writer.writeheader()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Create dataset and split into training and testing sets (80/20 split)
-    dataset = TensorDataset(input_tensor, labels_tensor)
-    train_size = int(0.8 * len(dataset))
-    test_size = len(dataset) - train_size
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    
-    # DataLoaders
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    
-    # Initialize model, loss function and optimizer
-    model = STAN(temporal_slices=num_temporal_slices, spatial_slices=num_spatial_slices, feature_dim=feature_dim)
-    model.to(device)
-    
-    # Use FocalLoss to focus learning on harder examples
-    criterion = FocalLoss(gamma=2, alpha=0.25, reduction='mean')
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    
-    num_epochs = 100
-    best_combined_metric, best_epoch, best_test_f1, best_test_auc \
-    = train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device)
-    
+
+    # Use seed 37 for this example
+    for seed in [37]:
+        print(f"\nRunning experiment for seed: {seed}")
+        
+        # Set seeds for reproducibility and enforce determinism
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        os.environ['PYTHONHASHSEED'] = str(seed)
+        if device.type == 'cuda':
+            torch.cuda.manual_seed_all(seed)
+            torch.cuda.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        
+        # Create a new dataset split
+        dataset = TensorDataset(input_tensor, labels_tensor)
+        train_size = int(0.8 * len(dataset))
+        test_size = len(dataset) - train_size
+        train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+        
+        # Initialize model, loss, and optimizer
+        model = STAN(temporal_slices=num_temporal_slices, spatial_slices=num_spatial_slices, feature_dim=feature_dim)
+        model.to(device)
+        criterion = FocalLoss(gamma=2, alpha=0.25, reduction='mean')
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        num_epochs = 100
+        
+        print(f"Seed {seed} - Running training...")
+        res = train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device)
+        
+        # Save results for this seed
+        writer.writerow({
+            'seed': seed,
+            'best_combined_metric': res[0],
+            'best_epoch': res[1],
+            'best_test_f1': res[2],
+            'best_test_auc': res[3]
+        })
+
+print(f"\nExperiment complete. Results saved to {csv_filename}.")

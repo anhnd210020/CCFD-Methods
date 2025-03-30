@@ -57,8 +57,6 @@ df['trans_date_trans_time'] = df['trans_date_trans_time'].apply(lambda x: x.time
 train, test = train_test_split(df, test_size=0.33, random_state=42, stratify=df['is_fraud'])
 print("Train shape:", train.shape)
 print("Test shape:", test.shape)
-train.to_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_fraudTrain.csv', index=False)
-test.to_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_fraudTest.csv', index=False)
 
 # Drop cột 'trans_num' nếu có
 if 'trans_num' in train.columns:

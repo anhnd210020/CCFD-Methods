@@ -6,20 +6,25 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, accuracy_score, confusion_matrix
+from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, accuracy_score
 import random
 
 #############################
 # 1. Load & Preprocess Data #
 #############################
 
-df = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_data.csv')
+# Loading the data
+file_path = '/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_data.csv'
+df = pd.read_csv(file_path)
 
-# Process time: convert to datetime and extract hour
+# ------------------ Data Preprocessing ------------------
+# Chuyển đổi thời gian và tạo các feature liên quan
 df['trans_date_trans_time'] = pd.to_datetime(df['trans_date_trans_time'])
+df['trans_date_trans_time_numeric'] = df['trans_date_trans_time'].apply(lambda x: x.timestamp())
+# Lấy giờ giao dịch: lấy phần đầu của chuỗi time (dạng hh)
 df['trans_hour'] = df['trans_date_trans_time'].dt.time.apply(lambda x: str(x)[:2])
 
-# Process date of birth: convert to datetime, compute age, and categorize
+# Xử lý ngày sinh và tính tuổi khách hàng
 df['dob'] = pd.to_datetime(df['dob'])
 df['cust_age'] = df['dob'].dt.year.apply(lambda x: 2021 - x)
 df['cust_age_groups'] = df['cust_age'].apply(lambda x: 'below 10' if x < 10 else (
@@ -31,12 +36,7 @@ df['cust_age_groups'] = df['cust_age'].apply(lambda x: 'below 10' if x < 10 else
     '60-70' if x >= 60 and x < 70 else (
     '70-80' if x >= 70 and x < 80 else 'Above 80'))))))))
 
-# Drop unnecessary columns (keep 'trans_date_trans_time' and 'cc_num')
-drop_col = ['Unnamed: 0', 'first', 'last', 'street', 'state', 'lat',
-            'long','dob', 'unix_time', 'cust_age', 'merch_lat', 'merch_long', 'city_pop', 'trans_num']
-df.drop(drop_col, axis=1, inplace=True)
-
-# Pivot table for cust_age_groups mapping to numeric indices
+# Mapping nhóm tuổi theo giá trị trung bình của amt trong giao dịch gian lận
 age_piv_2 = pd.pivot_table(data=df,
                            index='cust_age_groups',
                            columns='is_fraud',
@@ -46,12 +46,11 @@ age_piv_2.sort_values(by=1, ascending=True, inplace=True)
 age_dic = {k: v for (k, v) in zip(age_piv_2.index.values, age_piv_2.reset_index().index.values)}
 df['cust_age_groups'] = df['cust_age_groups'].map(age_dic)
 
-# Pivot table for category
+# Encode các biến category và job dựa trên giá trị trung bình của amt trong giao dịch gian lận
 merch_cat = df[df['is_fraud'] == 1].groupby('category')['amt'].mean().sort_values(ascending=True)
 merch_cat_dic = {k: v for (k, v) in zip(merch_cat.index.values, merch_cat.reset_index().index.values)}
 df['category'] = df['category'].map(merch_cat_dic)
 
-# Pivot table for job
 job_txn_piv_2 = pd.pivot_table(data=df,
                                index='job',
                                columns='is_fraud',
@@ -60,9 +59,19 @@ job_txn_piv_2 = pd.pivot_table(data=df,
 job_cat_dic = {k: v for (k, v) in zip(job_txn_piv_2.index.values, job_txn_piv_2.reset_index().index.values)}
 df['job'] = df['job'].map(job_cat_dic)
 
-df['trans_hour'] = df['trans_hour'].astype('int')
+# Encode các biến định danh bằng factorize
+df['merchant_num'] = pd.factorize(df['merchant'])[0]
+df['last_num'] = pd.factorize(df['last'])[0]
+df['street_num'] = pd.factorize(df['street'])[0]
+df['city_num'] = pd.factorize(df['city'])[0]
+df['zip_num'] = pd.factorize(df['zip'])[0]
+df['state_num'] = pd.factorize(df['state'])[0]
 df = pd.get_dummies(data=df, columns=['gender'], drop_first=True, dtype='int')
 
+# Bỏ các cột không cần thiết
+drop_cols = ['Unnamed: 0', 'trans_date_trans_time', 'cc_num', 'merchant', 'first', 'last', 'street', 'city', 'state', 
+             'lat', 'long', 'dob', 'unix_time', 'merch_lat', 'merch_long', 'city_pop']
+df.drop(columns=drop_cols, errors='ignore', inplace=True)
 
 #############################################
 # 2. Generate Synthetic Text from Transactions
@@ -75,18 +84,15 @@ def generate_synthetic_text(row):
     """
     time_str = row['trans_hour']
     templates = [
-        f"I purchased {row['merchant']} at {time_str} in {row['city']}. It's really a good experience.",
-        f"At {time_str}, I visited {row['merchant']} located in {row['city']} and spent ${row['amt']:.2f} on it. It was great.",
-        f"I made a transaction at {row['merchant']} around {time_str} in {row['city']} and paid ${row['amt']:.2f}. I loved the service.",
-        f"I went to {row['merchant']} at {time_str} in {row['city']} and enjoyed the purchase, spending ${row['amt']:.2f}.",
-        f"During {time_str}, I bought from {row['merchant']} in {row['city']} for an amount of ${row['amt']:.2f}. It was satisfactory."
+        f"I purchased {row['merchant_num']} at {time_str} in {row['city_num']}. It's really a good experience.",
+        f"At {time_str}, I visited {row['merchant_num']} located in {row['city_num']} and spent ${row['amt']:.2f} on it. It was great.",
+        f"I made a transaction at {row['merchant_num']} around {time_str} in {row['city_num']} and paid ${row['amt']:.2f}. I loved the service.",
+        f"I went to {row['merchant_num']} at {time_str} in {row['city_num']} and enjoyed the purchase, spending ${row['amt']:.2f}.",
+        f"During {time_str}, I bought from {row['merchant_num']} in {row['city_num']} for an amount of ${row['amt']:.2f}. It was satisfactory."
     ]
     return random.choice(templates)
 
 df['text_prompt'] = df.apply(generate_synthetic_text, axis=1)
-
-# Convert transaction time to numeric timestamp (after text generation)
-df['trans_date_trans_time'] = df['trans_date_trans_time'].apply(lambda x: x.timestamp())
 
 #############################################
 # 3. Split Data & Scale Numerical Features
@@ -94,36 +100,29 @@ df['trans_date_trans_time'] = df['trans_date_trans_time'].apply(lambda x: x.time
 
 # Split into training and testing sets (stratified by fraud label)
 train, test = train_test_split(df, test_size=0.33, random_state=42, stratify=df['is_fraud'])
-print("Train shape:", train.shape)
-print("Test shape:", test.shape)
+print("Shape of training data:", train.shape)
+print("Shape of testing data:", test.shape)
 
-# Separate features and labels
+# Loại bỏ cột trans_num nếu có (sẽ bị drop nếu không tồn tại)
+train.drop('trans_num', axis=1, inplace=True, errors='ignore')
+test.drop('trans_num', axis=1, inplace=True, errors='ignore')
+
+# Tách dữ liệu thành features và label
 y_train = train['is_fraud']
 X_train = train.drop('is_fraud', axis=1)
+
 y_test = test['is_fraud']
 X_test = test.drop('is_fraud', axis=1)
 
-print('Shape of training data:', (X_train.shape, y_train.shape))
-print('Shape of testing data:', (X_test.shape, y_test.shape))
-
-# For numerical scaling, drop columns used for text
-train_numeric = X_train.drop(['cc_num', 'text_prompt', 'merchant', 'city'], axis=1)
-test_numeric = X_test.drop(['cc_num', 'text_prompt', 'merchant', 'city'], axis=1)
+print('Shape of training data: ', (X_train.shape, y_train.shape))
+print('Shape of testing data: ', (X_test.shape, y_test.shape))
 
 sc = StandardScaler()
-X_train_sc_numeric = pd.DataFrame(sc.fit_transform(train_numeric),
-                                  columns=train_numeric.columns,
-                                  index=train_numeric.index)
-X_test_sc_numeric = pd.DataFrame(sc.transform(test_numeric),
-                                 columns=test_numeric.columns,
-                                 index=test_numeric.index)
 
 # Reconstruct DataFrames by adding back identifier and text columns
-X_train_sc = X_train_sc_numeric.copy()
 X_train_sc['cc_num'] = X_train['cc_num']
 X_train_sc['text_prompt'] = X_train['text_prompt']
 
-X_test_sc = X_test_sc_numeric.copy()
 X_test_sc['cc_num'] = X_test['cc_num']
 X_test_sc['text_prompt'] = X_test['text_prompt']
 
@@ -138,36 +137,53 @@ X_test_sc['is_fraud'] = y_test.values
 # 4. Create Sequences and Collect Text for Each Sample
 #######################################################
 
-sequence_length = 10  # number of transactions per sequence
-
-def create_sequences_with_text(df, sequence_length):
-    """
-    Groups transactions by cc_num and creates fixed-length sequences.
-    For each sequence, collects the synthetic text prompt from the latest transaction.
-    """
-    sequences, text_prompts, labels = [], [], []
+def create_sequences_transactional_expansion(df, memory_size):
+    sequences, labels = [], []
+    
+    # Nhóm theo 'cc_num' (số thẻ tín dụng của người dùng)
     grouped = df.groupby('cc_num')
+    
     for user_id, group in grouped:
-        group = group.sort_values(by='trans_date_trans_time')
-        numeric_data = group.drop(columns=['is_fraud', 'cc_num', 'text_prompt']).values
+        # Sắp xếp theo thời gian (đảm bảo rằng trans_date_trans_time đã là timestamp)
+        group = group.sort_values(by='trans_date_trans_time_numeric')
+        
+        # Lấy các giá trị (loại bỏ 'is_fraud' và 'cc_num' vì đây là features)
+        values = group.drop(columns=['is_fraud', 'cc_num']).values
         targets = group['is_fraud'].values
-        for i in range(len(group)):
-            if i < sequence_length:
-                pad_needed = sequence_length - (i + 1)
-                pad = np.repeat(numeric_data[0:1, :], pad_needed, axis=0)
-                seq = np.concatenate((pad, numeric_data[:i+1]), axis=0)
+        
+        n = len(group)
+        
+        # Tạo chuỗi giao dịch cho mỗi giao dịch
+        for i in range(n):
+            if i < memory_size:
+                # Nếu số giao dịch hiện tại ít hơn 'memory_size', sao chép giao dịch đầu tiên
+                pad_needed = memory_size - (i + 1)
+                # Sao chép giao dịch đầu tiên cho đủ số lượng pad
+                pad = np.repeat(values[0:1, :], pad_needed, axis=0)
+                seq = np.concatenate((pad, values[:i+1]), axis=0)
             else:
-                seq = numeric_data[i-sequence_length+1:i+1]
+                # Nếu đủ giao dịch, lấy sequence gồm các giao dịch từ (i - memory_size + 1) đến i
+                seq = values[i-memory_size+1:i+1]
+            
+            # Thêm sequence và label vào danh sách
             sequences.append(seq)
-            text_prompts.append(group.iloc[i]['text_prompt'])
             labels.append(targets[i])
-    return np.array(sequences), text_prompts, np.array(labels)
+    
+    return np.array(sequences), np.array(labels)
 
-X_train_seq, train_texts, y_train_seq = create_sequences_with_text(X_train_sc, sequence_length)
-X_test_seq, test_texts, y_test_seq = create_sequences_with_text(X_test_sc, sequence_length)
+memory_size = 800  # Chọn memory_size như một giá trị cố định (hoặc có thể thử các giá trị khác như 30, 50)
+train_seq_df = X_train_sc.copy()
+train_seq_df['is_fraud'] = y_train.values
 
-print("Transaction sequence shape (train):", X_train_seq.shape)
-print("Transaction sequence shape (test):", X_test_seq.shape)
+test_seq_df = X_test_sc.copy()
+test_seq_df['is_fraud'] = y_test.values
+
+# Tạo các chuỗi theo phương pháp Transactional Expansion
+X_train_seq, y_train_seq = create_sequences_transactional_expansion(train_seq_df, memory_size)
+X_test_seq, y_test_seq = create_sequences_transactional_expansion(test_seq_df, memory_size)
+
+print("Sequence shape (train):", X_train_seq.shape)
+print("Sequence shape (test):", X_test_seq.shape)
 
 #################################################
 # 5. Build a Simple Text Tokenizer & Vocabulary #
@@ -234,7 +250,7 @@ class MultiModalFraudDataset(Dataset):
         label = torch.tensor(self.labels[idx], dtype=torch.float32)
         return trans, text, label
 
-batch_size = 32768
+batch_size = 64
 train_dataset = MultiModalFraudDataset(X_train_seq, train_text_tokens, y_train_seq)
 test_dataset = MultiModalFraudDataset(X_test_seq, test_text_tokens, y_test_seq)
 
@@ -294,31 +310,123 @@ model.to(device)
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-##############################################
-# 8. Train the Multi-Modal Model             #
-##############################################
+######################################
+# 8. Evaluation and Training Functions
+######################################
 
-num_epochs = 80  # Adjust as needed
-for epoch in range(num_epochs):
-    model.train()
-    total_loss = 0
-    for trans_batch, text_batch, label_batch in train_loader:
-        trans_batch = trans_batch.to(device)
-        text_batch = text_batch.to(device)
-        label_batch = label_batch.to(device)
+# 5️⃣ Evaluation Function for Multi-Modal Data
+def evaluate_model(loader, model, device):
+    model.eval()
+    all_preds = []
+    all_targets = []
+    with torch.no_grad():
+        for trans_batch, text_batch, label_batch in loader:
+            trans_batch = trans_batch.to(device)
+            text_batch = text_batch.to(device)
+            outputs = model(trans_batch, text_batch).squeeze().cpu().numpy()
+            all_preds.extend(outputs)
+            all_targets.extend(label_batch.cpu().numpy())
+    
+    all_preds = np.array(all_preds)
+    all_targets = np.array(all_targets)
+    
+    # Compute ROC AUC score
+    auc = roc_auc_score(all_targets, all_preds)
+    
+    # Search for the best threshold (using thresholds 0.1 to 0.9) based on F1 score
+    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    best_f1 = 0
+    best_threshold = 0.5
+    for t in thresholds:
+        binary_preds = (all_preds > t).astype(int)
+        f1 = f1_score(all_targets, binary_preds)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = t
+    combined_metric = (best_f1 + auc) / 2
+    
+    # Compute additional metrics using the best threshold
+    binary_preds = (all_preds > best_threshold).astype(int)
+    cm = confusion_matrix(all_targets, binary_preds)
+    TP = cm[1, 1] if cm.shape[0] > 1 and cm.shape[1] > 1 else 0
+    FP = cm[0, 1] if cm.shape[1] > 1 else 0
+    FN = cm[1, 0] if cm.shape[0] > 1 else 0
+    TN = cm[0, 0]
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0
+    
+    return best_threshold, best_f1, auc, combined_metric, accuracy, precision, recall
+
+# 6️⃣ Training Function for Multi-Modal Data (without checkpoint saving)
+def train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device):
+    best_loss = float('inf')
+    best_combined_metric_test = -float('inf')
+    epochs_without_improvement = 0
+
+    # Variables to store the best epoch and metrics
+    best_epoch = None
+    best_train_metrics = None
+    best_test_metrics = None
+
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0.0
+        for trans_batch, text_batch, label_batch in train_loader:
+            trans_batch = trans_batch.to(device)
+            text_batch = text_batch.to(device)
+            label_batch = label_batch.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(trans_batch, text_batch).squeeze()
+            loss = criterion(outputs, label_batch)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        average_loss = total_loss / len(train_loader)
+        print(f'\nEpoch {epoch+1}, Loss: {average_loss:.4f}')
         
-        optimizer.zero_grad()
-        outputs = model(trans_batch, text_batch).squeeze()
-        loss = criterion(outputs, label_batch)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    avg_loss = total_loss / len(train_loader)
-    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+        # Evaluate on the training set
+        train_threshold, train_f1, train_auc, train_combined, train_acc, train_prec, train_rec = evaluate_model(train_loader, model, device)
+        print(f"Train Metrics - Best Threshold: {train_threshold:.2f}, F1: {train_f1:.4f}, AUC: {train_auc:.4f}, Combined: {train_combined:.4f}, Accuracy: {train_acc:.4f}, Precision: {train_prec:.4f}, Recall: {train_rec:.4f}")
+        
+        # Evaluate on the test set
+        test_threshold, test_f1, test_auc, test_combined, test_acc, test_prec, test_rec = evaluate_model(test_loader, model, device)
+        print(f"Test Metrics  - Best Threshold: {test_threshold:.2f}, F1: {test_f1:.4f}, AUC: {test_auc:.4f}, Combined: {test_combined:.4f}, Accuracy: {test_acc:.4f}, Precision: {test_prec:.4f}, Recall: {test_rec:.4f}")
+        
+        # Update best metrics based on test_combined
+        if test_combined > best_combined_metric_test:
+            best_combined_metric_test = test_combined
+            best_epoch = epoch + 1
+            best_train_metrics = (train_f1, train_auc, train_combined)
+            best_test_metrics = (test_f1, test_auc, test_combined)
+            print(f'*** Best metrics updated at epoch {epoch+1} ***')
+        
+        # Early stopping: if loss does not improve in 8 consecutive epochs
+        if average_loss < best_loss:
+            best_loss = average_loss
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= 8:
+                print(f'Early stopping triggered at epoch {epoch+1}')
+                break
 
-#######################################################
-# 9. Evaluate the Model Using an Inference Prompt      #
-#######################################################
+    print("\n========== Final Best Results ==========")
+    print(f"Best Epoch: {best_epoch}")
+    print(f"Train Metrics - F1: {best_train_metrics[0]:.4f}, AUC: {best_train_metrics[1]:.4f}, Combined: {best_train_metrics[2]:.4f}")
+    print(f"Test Metrics  - F1: {best_test_metrics[0]:.4f}, AUC: {best_test_metrics[1]:.4f}, Combined: {best_test_metrics[2]:.4f}")
+
+######################################
+# 9. Train the Multi-Modal Model
+######################################
+
+num_epochs = 100  # Adjust as needed
+train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device)
+
+######################################
+# 10. Evaluate the Model Using an Inference Prompt
+######################################
 
 # For inference, override the text input with a custom prompt.
 inference_prompt = "I hate this man. He is my exlover. I want to check if he is fraud or not."
@@ -345,7 +453,7 @@ recall = recall_score(y_test_seq, y_pred_test, zero_division=0)
 f1 = f1_score(y_test_seq, y_pred_test, zero_division=0)
 roc_auc = roc_auc_score(y_test_seq, y_pred_test_proba)
 
-print("Test Evaluation with Inference Prompt:")
+print("\nTest Evaluation with Inference Prompt:")
 print(f"Accuracy: {accuracy:.4f}")
 print(f"Precision: {precision:.4f}")
 print(f"Recall: {recall:.4f}")

@@ -9,12 +9,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, f1_score
 from sklearn.metrics import confusion_matrix
 
-# ---------------------------
-# 1. Data Preprocessing
-# ---------------------------
 df = pd.read_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/combined_data.csv')
 
-# Process date and time
+# Xử lý thời gian
 df['trans_date_trans_time'] = pd.to_datetime(df['trans_date_trans_time'])
 df['trans_date_trans_time_numeric'] = df['trans_date_trans_time'].apply(lambda x: x.timestamp())
 df['trans_hour'] = df['trans_date_trans_time'].dt.time.apply(lambda x: str(x)[:2])
@@ -56,19 +53,18 @@ df = pd.get_dummies(data=df, columns=['gender'], drop_first=True, dtype='int')
 drop_cols = ['Unnamed: 0', 'trans_date_trans_time', 'merchant', 'first', 'last', 'street', 'city', 'state', 'lat', 'long', 'dob',
              'unix_time', 'merch_lat', 'merch_long', 'city_pop']
 df.drop(columns=drop_cols, errors='ignore', inplace=True)
+# 2️⃣ Train_test_split
+# =============================================================================
 
-# ---------------------------
-# 2. Train-test Split and Scaling
-# ---------------------------
 train, test = train_test_split(df, test_size=0.33, random_state=42, stratify=df['is_fraud'])
 print("Train shape:", train.shape)
 print("Test shape:", test.shape)
 
-# Drop 'trans_num' column from both train and test
+# Drop cột trans_num từ cả train và test
 train.drop('trans_num', axis=1, inplace=True)
 test.drop('trans_num', axis=1, inplace=True)
 
-# Split features and labels
+# Tách features và label
 y_train = train['is_fraud']
 X_train = train.drop('is_fraud', axis=1)
 
@@ -78,162 +74,76 @@ X_test = test.drop('is_fraud', axis=1)
 print('Shape of training data:', (X_train.shape, y_train.shape))
 print('Shape of testing data:', (X_test.shape, y_test.shape))
 
-# Scale the data
+# =============================================================================
+# 3️⃣ Scaling dữ liệu
+# =============================================================================
 sc = StandardScaler()
 X_train_sc = sc.fit_transform(X_train)
 X_test_sc = sc.transform(X_test)
 
-# Convert back to DataFrame
+# Convert lại thành DataFrame
 X_train_sc = pd.DataFrame(data=X_train_sc, columns=X_train.columns)
 X_test_sc = pd.DataFrame(data=X_test_sc, columns=X_test.columns)
 
-# ---------------------------
-# 3. Create Sequences (Transactional Expansion)
-# ---------------------------
 def create_sequences_transactional_expansion(df, memory_size):
     sequences, labels = [], []
     
-    # Group by 'cc_num' (credit card number)
+    # Nhóm theo 'cc_num' (số thẻ tín dụng của người dùng)
     grouped = df.groupby('cc_num')
     
     for user_id, group in grouped:
-        # Sort by time (using the timestamp column)
+        # Sắp xếp theo thời gian (đảm bảo rằng trans_date_trans_time đã là timestamp)
         group = group.sort_values(by='trans_date_trans_time_numeric')
         
-        # Get the values (drop 'is_fraud' and 'cc_num' as they are not features)
+        # Lấy các giá trị (loại bỏ 'is_fraud' và 'cc_num' vì đây là features)
         values = group.drop(columns=['is_fraud', 'cc_num']).values
         targets = group['is_fraud'].values
         
         n = len(group)
         
-        # Create a sequence for each transaction
+        # Tạo chuỗi giao dịch cho mỗi giao dịch
         for i in range(n):
             if i < memory_size:
+                # Nếu số giao dịch hiện tại ít hơn 'memory_size', sao chép giao dịch đầu tiên
                 pad_needed = memory_size - (i + 1)
+                # Sao chép giao dịch đầu tiên cho đủ số lượng pad
                 pad = np.repeat(values[0:1, :], pad_needed, axis=0)
                 seq = np.concatenate((pad, values[:i+1]), axis=0)
             else:
+                # Nếu đủ giao dịch, lấy sequence gồm các giao dịch từ (i - memory_size + 1) đến i
                 seq = values[i-memory_size+1:i+1]
             
+            # Thêm sequence và label vào danh sách
             sequences.append(seq)
             labels.append(targets[i])
     
     return np.array(sequences), np.array(labels)
 
-memory_size = 500  # You may experiment with different memory sizes
+memory_size = 500  # Chọn memory_size như một giá trị cố định (hoặc có thể thử các giá trị khác như 30, 50)
 train_seq_df = X_train_sc.copy()
 train_seq_df['is_fraud'] = y_train.values
 
 test_seq_df = X_test_sc.copy()
 test_seq_df['is_fraud'] = y_test.values
 
-# Create sequences
+# Tạo các chuỗi theo phương pháp Transactional Expansion
 X_train_seq, y_train_seq = create_sequences_transactional_expansion(train_seq_df, memory_size)
 X_test_seq, y_test_seq = create_sequences_transactional_expansion(test_seq_df, memory_size)
 
 print("Sequence shape (train):", X_train_seq.shape)
 print("Sequence shape (test):", X_test_seq.shape)
 
-# ---------------------------
-# 4. Build TH‑LSTM Model
-# ---------------------------
-class THLSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super(THLSTMCell, self).__init__()
-        self.hidden_size = hidden_size
-        self.linear_s = nn.Linear(hidden_size + input_size + 1, hidden_size)
-        self.linear_f = nn.Linear(hidden_size + input_size + hidden_size, hidden_size)
-        self.linear_i = nn.Linear(hidden_size + input_size + hidden_size, hidden_size)
-        self.linear_T = nn.Linear(hidden_size + input_size + hidden_size, hidden_size)
-        self.linear_u = nn.Linear(hidden_size + input_size + hidden_size, hidden_size)
-        self.linear_o = nn.Linear(hidden_size + input_size + hidden_size, hidden_size)
-    def forward(self, x_t, delta_t, h_prev, c_prev):
-        s_t = torch.tanh(self.linear_s(torch.cat([h_prev, x_t, delta_t], dim=1)))
-        f_t = torch.sigmoid(self.linear_f(torch.cat([h_prev, x_t, s_t], dim=1)))
-        i_t = torch.sigmoid(self.linear_i(torch.cat([h_prev, x_t, s_t], dim=1)))
-        T_t = torch.sigmoid(self.linear_T(torch.cat([h_prev, x_t, s_t], dim=1)))
-        zeta_t = torch.tanh(self.linear_u(torch.cat([h_prev, x_t, s_t], dim=1)))
-        c_t = f_t * c_prev + i_t * zeta_t + T_t * s_t
-        o_t = torch.sigmoid(self.linear_o(torch.cat([h_prev, x_t, s_t], dim=1)))
-        h_t = o_t * torch.tanh(c_t)
-        return h_t, c_t
-
-class THLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, attention_memory=10, time_idx=0):
-        super(THLSTM, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.attention_memory = attention_memory  # number of historical steps for attention
-        self.time_idx = time_idx  # index of the time column in the input vector
-        self.cells = nn.ModuleList([THLSTMCell(input_size if i==0 else hidden_size, hidden_size) for i in range(num_layers)])
-        # Attention Module: transforms q_t and historical hidden states
-        self.linear_aq = nn.Linear(2 * hidden_size, hidden_size)
-        self.linear_ah = nn.Linear(hidden_size, hidden_size)
-        self.bias_a = nn.Parameter(torch.zeros(hidden_size))
-        self.v = nn.Parameter(torch.ones(hidden_size))
-        # Interaction module
-        self.linear_interact = nn.Linear(2 * hidden_size, hidden_size)
-    def forward(self, x):
-        # x: [batch, seq_len, input_size]
-        batch_size, seq_len, _ = x.size()
-        device = x.device
-        h = [torch.zeros(batch_size, self.hidden_size, device=device) for _ in range(self.num_layers)]
-        c = [torch.zeros(batch_size, self.hidden_size, device=device) for _ in range(self.num_layers)]
-        hidden_states = []  # store last layer hidden states at each time step
-        for t in range(seq_len):
-            x_t = x[:, t, :]  # [batch, input_size]
-            # Compute Δt from the time column (assumes self.time_idx is the time column index)
-            if t == 0:
-                delta_t = torch.zeros(batch_size, 1, device=device)
-            else:
-                time_t = x[:, t, self.time_idx].unsqueeze(1)  # [batch, 1]
-                time_prev = x[:, t-1, self.time_idx].unsqueeze(1)
-                delta_t = time_t - time_prev
-            # Iterate through layers
-            for layer in range(self.num_layers):
-                inp = x_t if layer == 0 else h[layer - 1]
-                h[layer], c[layer] = self.cells[layer](inp, delta_t, h[layer], c[layer])
-            hidden_states.append(h[-1].unsqueeze(1))
-        H = torch.cat(hidden_states, dim=1)  # [batch, seq_len, hidden_size]
-        # Compute attention for the final step using the last 'attention_memory' steps
-        if seq_len < self.attention_memory:
-            mem_indices = list(range(seq_len))
-        else:
-            mem_indices = list(range(seq_len - self.attention_memory, seq_len))
-        q_t = torch.cat([h[-1], c[-1]], dim=1)  # [batch, 2*hidden_size]
-        q_t_proj = self.linear_aq(q_t).unsqueeze(1)  # [batch, 1, hidden_size]
-        H_mem = H[:, mem_indices, :]  # [batch, m, hidden_size]
-        H_proj = self.linear_ah(H_mem)  # [batch, m, hidden_size]
-        scores = torch.tanh(q_t_proj + H_proj + self.bias_a)  # [batch, m, hidden_size]
-        scores = torch.matmul(scores, self.v)  # [batch, m]
-        alpha = torch.softmax(scores, dim=1).unsqueeze(2)  # [batch, m, 1]
-        e_t = torch.sum(alpha * H_mem, dim=1)  # [batch, hidden_size]
-        final_repr = torch.tanh(self.linear_interact(torch.cat([h[-1], e_t], dim=1)))  # [batch, hidden_size]
-        return final_repr
-
-class THLSTMClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, attention_memory=10, time_idx=0):
-        super(THLSTMClassifier, self).__init__()
-        self.th_lstm = THLSTM(input_size, hidden_size, num_layers, attention_memory, time_idx)
-        self.fc = nn.Linear(hidden_size, 1)
-        self.sigmoid = nn.Sigmoid()
-    def forward(self, x):
-        repr = self.th_lstm(x)  # [batch, hidden_size]
-        out = self.fc(repr)
-        return self.sigmoid(out)
-
-# ---------------------------
-# 5. Dataset and DataLoader
-# ---------------------------
 class FraudDataset(Dataset):
     def __init__(self, X, y):
-        self.X = X  # [num_sequences, seq_len, num_features]
+        self.X = X  # shape: (num_sequences, sequence_length, num_features)
         self.y = y
+
     def __len__(self):
         return len(self.X)
+
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
-    
+
 batch_size = 64
 
 train_dataset = FraudDataset(torch.tensor(X_train_seq, dtype=torch.float32),
@@ -241,10 +151,28 @@ train_dataset = FraudDataset(torch.tensor(X_train_seq, dtype=torch.float32),
 test_dataset = FraudDataset(torch.tensor(X_test_seq, dtype=torch.float32),
                               torch.tensor(y_test_seq, dtype=torch.float32))
 
-# Shuffle only the order of sequences, not the order within each sequence
+# Shuffle chỉ xáo trộn thứ tự các sequence, không làm xáo trộn bên trong mỗi sequence
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
+# =============================================================================
+# 6. Xây dựng mô hình GRU
+# =============================================================================
+class FraudLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers):
+        super(FraudLSTM, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+    
+    def forward(self, x):
+        # x: [batch, sequence_length, features]
+        out, (h_n, c_n) = self.lstm(x)
+        # Use the hidden state from the last LSTM layer at the last time step
+        out = self.fc(h_n[-1])
+        return self.sigmoid(out)
+
+# 5️⃣ Evaluation Function
 def evaluate_model(loader, model, device):
     model.eval()
     all_preds = []
@@ -273,7 +201,7 @@ def evaluate_model(loader, model, device):
             best_threshold = t
     combined_metric = (best_f1 + auc) / 2
     
-    # Compute additional metrics using the best threshold
+    # Also compute additional metrics using the best threshold
     binary_preds = (all_preds > best_threshold).astype(int)
     cm = confusion_matrix(all_targets, binary_preds)
     TP = cm[1, 1] if cm.shape[0] > 1 and cm.shape[1] > 1 else 0
@@ -286,15 +214,13 @@ def evaluate_model(loader, model, device):
     
     return best_threshold, best_f1, auc, combined_metric, accuracy, precision, recall
 
-# ---------------------------
-# 6. Training Function
-# ---------------------------
+# 6️⃣ Training Function without checkpoint saving
 def train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device):
     best_loss = float('inf')
     best_combined_metric_test = -float('inf')
     epochs_without_improvement = 0
 
-    # Variables to store the best results
+    # Biến lưu kết quả tốt nhất
     best_epoch = None
     best_train_metrics = None
     best_test_metrics = None
@@ -321,7 +247,7 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
         test_threshold, test_f1, test_auc, test_combined, test_acc, test_prec, test_rec = evaluate_model(test_loader, model, device)
         print(f"Test Metrics  - Best Threshold: {test_threshold:.2f}, F1: {test_f1:.4f}, AUC: {test_auc:.4f}, Combined: {test_combined:.4f}, Accuracy: {test_acc:.4f}, Precision: {test_prec:.4f}, Recall: {test_rec:.4f}")
         
-        # Update best metrics based on test_combined
+        # Cập nhật thông tin của epoch tốt nhất dựa trên test_combined
         if test_combined > best_combined_metric_test:
             best_combined_metric_test = test_combined
             best_epoch = epoch + 1
@@ -329,7 +255,7 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
             best_test_metrics = (test_f1, test_auc, test_combined)
             print(f'*** Best metrics updated at epoch {epoch+1} ***')
         
-        # Early stopping: if loss doesn't improve for 8 consecutive epochs
+        # Early stopping: nếu loss không cải thiện trong 8 epoch liên tiếp
         if average_loss < best_loss:
             best_loss = average_loss
             epochs_without_improvement = 0
@@ -338,21 +264,19 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
             if epochs_without_improvement >= 8:
                 print(f'Early stopping triggered at epoch {epoch+1}')
                 break
-    # Print best results of the best epoch
+    # In ra kết quả tốt nhất của epoch đã chạy
     print("\n========== Final Best Results ==========")
     print(f"Best Epoch: {best_epoch}")
     print(f"Train Metrics - F1: {best_train_metrics[0]:.4f}, AUC: {best_train_metrics[1]:.4f}, Combined: {best_train_metrics[2]:.4f}")
     print(f"Test Metrics  - F1: {best_test_metrics[0]:.4f}, AUC: {best_test_metrics[1]:.4f}, Combined: {best_test_metrics[2]:.4f}")
 
-# ---------------------------
-# 7. Initialize and Train the TH‑LSTM Classifier
-# ---------------------------
-input_size = X_train_seq.shape[2]    # number of features (including the time column)
+# 7️⃣ Model Initialization and Training
+# Model Initialization and Training
+input_size = X_train_seq.shape[2]  # number of features
 hidden_size = 64
 num_layers = 2
-time_idx = 0            # assuming the time column is at index 0 in the feature vector
-attention_memory = 10   # number of historical steps for attention
-model = THLSTMClassifier(input_size, hidden_size, num_layers, attention_memory, time_idx)
+model = FraudLSTM(input_size, hidden_size, num_layers)
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.device_count() > 1:
@@ -365,41 +289,3 @@ criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 num_epochs = 30
 train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device)
-
-# ---------------------------
-# 8. Feature Extraction
-# ---------------------------
-def extract_features(model, loader, device):
-    model.eval()
-    features_list = []
-    labels_list = []
-    with torch.no_grad():
-        for X_batch, y_batch in loader:
-            X_batch = X_batch.to(device)
-            # Extract latent representation from TH‑LSTM (before the final classification layer)
-            if isinstance(model, nn.DataParallel):
-                latent_repr = model.module.th_lstm(X_batch)
-            else:
-                latent_repr = model.th_lstm(X_batch)
-            features_list.append(latent_repr.cpu().numpy())
-            labels_list.append(y_batch.cpu().numpy())
-    features = np.concatenate(features_list, axis=0)
-    labels = np.concatenate(labels_list, axis=0)
-    return features, labels
-
-# Extract features for train and test datasets
-train_features, train_labels = extract_features(model, train_loader, device)
-test_features, test_labels = extract_features(model, test_loader, device)
-
-# Create DataFrames for the extracted features and append the label column
-train_features_df = pd.DataFrame(train_features, columns=[f'feature_{i}' for i in range(train_features.shape[1])])
-train_features_df['label'] = train_labels
-
-test_features_df = pd.DataFrame(test_features, columns=[f'feature_{i}' for i in range(test_features.shape[1])])
-test_features_df['label'] = test_labels
-
-# Save the extracted features to CSV files for later use in traditional ML models
-train_features_df.to_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/thlstm_train_features.csv', index=False)
-test_features_df.to_csv(r'/home/ducanh/Credit Card Transactions Fraud Detection/Datasets/thlstm_test_features.csv', index=False)
-
-print("Feature extraction completed. Train features shape:", train_features.shape, "Test features shape:", test_features.shape)

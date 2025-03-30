@@ -43,6 +43,55 @@ class FocalLoss(nn.Module):
             return focal_loss
 
 ########################################
+# Contrastive Loss Implementation
+########################################
+
+class ContrastiveLoss(nn.Module):
+    def __init__(self, margin=1.0):
+        """
+        Contrastive loss that encourages embeddings of the same class to be close
+        and embeddings of different classes to be separated by at least a margin.
+        
+        Args:
+            margin (float): Margin for dissimilar pairs.
+        """
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, embeddings, labels):
+        """
+        Args:
+            embeddings: Tensor of shape (B, D) where D is the embedding dimension.
+            labels: Tensor of shape (B,) with binary labels.
+        Returns:
+            Scalar contrastive loss.
+        """
+        batch_size = embeddings.size(0)
+        # Compute pairwise Euclidean distances.
+        # Expand embeddings to compute differences between every pair.
+        expanded_a = embeddings.unsqueeze(1).expand(batch_size, batch_size, -1)
+        expanded_b = embeddings.unsqueeze(0).expand(batch_size, batch_size, -1)
+        distances = torch.sqrt(torch.sum((expanded_a - expanded_b) ** 2, dim=2) + 1e-8)
+        
+        # Create a label matrix where entry (i, j)=1 if same class, 0 otherwise.
+        labels = labels.view(-1)
+        label_matrix = (labels.unsqueeze(1) == labels.unsqueeze(0)).float()
+        
+        # Contrastive loss formula:
+        # For similar pairs (label_matrix==1): loss = 0.5 * distance^2
+        # For dissimilar pairs (label_matrix==0): loss = 0.5 * max(0, margin - distance)^2
+        loss_similar = 0.5 * (distances ** 2)
+        loss_dissimilar = 0.5 * (F.relu(self.margin - distances) ** 2)
+        
+        # Combine losses.
+        loss = label_matrix * loss_similar + (1 - label_matrix) * loss_dissimilar
+        
+        # We consider only each pair once (i<j) to avoid redundancy.
+        mask = torch.triu(torch.ones_like(loss), diagonal=1)
+        loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+        return loss
+
+########################################
 # Load Preprocessed Data
 ########################################
 
@@ -120,10 +169,14 @@ class STAN(nn.Module):
             nn.ReLU(),
             nn.AdaptiveMaxPool3d((1, 1, 1))
         )
-        self.fc = nn.Sequential(
+        # Define a two-part fully connected network.
+        # fc_part extracts embeddings, and fc_out produces the final prediction.
+        self.fc_part = nn.Sequential(
             nn.Linear(conv_channels * 2, 32),
             nn.ReLU(),
-            nn.Dropout(0.5),  # Added dropout for better generalization.
+            nn.Dropout(0.5)
+        )
+        self.fc_out = nn.Sequential(
             nn.Linear(32, 1),
             nn.Sigmoid()
         )
@@ -135,8 +188,11 @@ class STAN(nn.Module):
         x_conv = x_temp.unsqueeze(2)  # (B, 1, D=1, H=S, W=F)
         conv_out = self.conv3d(x_conv)  # (B, conv_channels*2, 1, 1, 1)
         conv_out = conv_out.view(x.size(0), -1)  # (B, conv_channels*2)
-        out = self.fc(conv_out)  # (B, 1)
-        return out
+        # Extract embeddings
+        embeddings = self.fc_part(conv_out)  # (B, 32)
+        # Final classification output
+        out = self.fc_out(embeddings)  # (B, 1)
+        return out, embeddings
 
 ########################################
 # Evaluation Function
@@ -150,7 +206,8 @@ def evaluate_model(data_loader, model, device):
         for X_batch, y_batch in data_loader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
-            outputs = model(X_batch).squeeze()
+            outputs, _ = model(X_batch)
+            outputs = outputs.squeeze()
             all_outputs.append(outputs.cpu().numpy())
             all_labels.append(y_batch.cpu().numpy())
     all_outputs = np.concatenate(all_outputs)
@@ -176,13 +233,15 @@ def evaluate_model(data_loader, model, device):
     return best_threshold, f1, auc, combined, acc, prec, rec
 
 ########################################
-# Training Function with Early Stopping
+# Training Function with Early Stopping and Combined Loss
 ########################################
 
-def train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device):
+def train_model(model, train_loader, test_loader, focal_criterion, contrastive_criterion, optimizer, num_epochs, device, lambda_contrastive=0.1):
     best_loss = float('inf')
     best_combined_metric_test = -float('inf')
     best_epoch = -1
+    best_test_f1 = 0.0
+    best_test_auc = 0.0
     epochs_without_improvement = 0
 
     for epoch in range(num_epochs):
@@ -191,30 +250,36 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
-            outputs = model(X_batch).squeeze()
-            loss = criterion(outputs, y_batch)
+            outputs, embeddings = model(X_batch)
+            outputs = outputs.squeeze()
+            # Classification loss.
+            loss_class = focal_criterion(outputs, y_batch)
+            # Contrastive loss.
+            loss_contrastive = contrastive_criterion(embeddings, y_batch)
+            # Combined loss.
+            loss = loss_class + lambda_contrastive * loss_contrastive
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
         average_loss = total_loss / len(train_loader)
         print(f'\nEpoch {epoch+1}, Loss: {average_loss:.4f}')
         
-        # Evaluate on training set
+        # Evaluate on training set.
         train_threshold, train_f1, train_auc, train_combined, train_acc, train_prec, train_rec = evaluate_model(train_loader, model, device)
         print(f"Train Metrics - Best Threshold: {train_threshold:.2f}, F1: {train_f1:.4f}, AUC: {train_auc:.4f}, Combined: {train_combined:.4f}, Accuracy: {train_acc:.4f}, Precision: {train_prec:.4f}, Recall: {train_rec:.4f}")
         
-        # Evaluate on test set
+        # Evaluate on test set.
         test_threshold, test_f1, test_auc, test_combined, test_acc, test_prec, test_rec = evaluate_model(test_loader, model, device)
         print(f"Test Metrics  - Best Threshold: {test_threshold:.2f}, F1: {test_f1:.4f}, AUC: {test_auc:.4f}, Combined: {test_combined:.4f}, Accuracy: {test_acc:.4f}, Precision: {test_prec:.4f}, Recall: {test_rec:.4f}")
         
-        # Update best results
+        # Update best results based on test combined metric.
         if test_combined > best_combined_metric_test:
             best_combined_metric_test = test_combined
             best_epoch = epoch + 1
             best_test_f1 = test_f1
             best_test_auc = test_auc
         
-        # Early stopping: if loss does not improve for 8 consecutive epochs
+        # Early stopping: if loss does not improve for 8 consecutive epochs.
         if average_loss < best_loss:
             best_loss = average_loss
             epochs_without_improvement = 0
@@ -225,7 +290,7 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
                 break
                 
     print("\nTraining complete.")
-    print(f"Best Test Combined Metric achieved: {best_combined_metric_test:.4f} at epoch {best_epoch}")
+    print(f"Best Test Combined Metric: {best_combined_metric_test:.4f} at epoch {best_epoch}")
     print(f"Best Test F1: {best_test_f1:.4f}, Best Test AUC: {best_test_auc:.4f}")
     return best_combined_metric_test, best_epoch, best_test_f1, best_test_auc
 
@@ -234,28 +299,30 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, num_epoc
 ########################################
 
 if __name__ == "__main__":
-    # Device configuration
+    # Device configuration.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Create dataset and split into training and testing sets (80/20 split)
+    # Create dataset and split into training and testing sets (80/20 split).
     dataset = TensorDataset(input_tensor, labels_tensor)
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
     
-    # DataLoaders
+    # DataLoaders.
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
     
-    # Initialize model, loss function and optimizer
+    # Initialize model, loss functions and optimizer.
     model = STAN(temporal_slices=num_temporal_slices, spatial_slices=num_spatial_slices, feature_dim=feature_dim)
     model.to(device)
     
-    # Use FocalLoss to focus learning on harder examples
-    criterion = FocalLoss(gamma=2, alpha=0.25, reduction='mean')
+    focal_criterion = FocalLoss(gamma=2, alpha=0.25, reduction='mean')
+    contrastive_criterion = ContrastiveLoss(margin=1.0)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
     num_epochs = 100
-    best_combined_metric, best_epoch, best_test_f1, best_test_auc \
-    = train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs, device)
+    best_combined_metric, best_epoch, best_test_f1, best_test_auc = train_model(
+     model, train_loader, test_loader, focal_criterion, contrastive_criterion, optimizer, num_epochs, device, lambda_contrastive=0.1)
     
+
+

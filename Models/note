@@ -242,3 +242,23 @@ Test Metrics  - Best Threshold: 0.10, F1: 0.9848, AUC: 0.8050, Combined: 0.8949,
 25/3/2025:
 Train Metrics - Best Threshold: 0.70, F1: 0.9672, AUC: 0.9996, Combined: 0.9834, Accuracy: 0.9997, Precision: 0.9818, Recall: 0.9530
 Test Metrics  - Best Threshold: 0.60, F1: 0.9022, AUC: 0.9966, Combined: 0.9494, Accuracy: 0.9990, Precision: 0.9203, Recall: 0.8848
+26/3/2025:
+- tinh do tuong quan nhung features sau khi training models
+27/3/2025:
+/- Read more papers
+28/3/2025:
+STAN:
+Epoch 41, Loss: 0.0095
+Train Metrics - Best Threshold: 0.10, F1: 0.9886, AUC: 0.7293, Combined: 0.8589, Accuracy: 0.9775, Precision: 0.9775, Recall: 1.0000
+Test Metrics  - Best Threshold: 0.10, F1: 0.9873, AUC: 0.8533, Combined: 0.9203, Accuracy: 0.9750, Precision: 0.9750, Recall: 1.0000
+STAN with constrastive loss:
+Epoch 9, Loss: 2.1810
+Train Metrics - Best Threshold: 0.10, F1: 0.9873, AUC: 0.4972, Combined: 0.7423, Accuracy: 0.9750, Precision: 0.9750, Recall: 1.0000
+Test Metrics  - Best Threshold: 0.10, F1: 0.9924, AUC: 0.8646, Combined: 0.9285, Accuracy: 0.9850, Precision: 0.9850, Recall: 1.0000
+
+Test:
+Best Test Combined Metric: 0.9887 at epoch 5
+Best Test F1: 0.9975, Best Test AUC: 0.9799
+Seeds:  64%|███████████████████████████████████████████████████████████████████████                                        | 64/100 [09:19<03:03,  5.10s/it]
+Running experiment for seed: 65
+Seed 65 - Running training...
