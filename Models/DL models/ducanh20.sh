@@ -1,1 +1,0 @@
-python STGN_20.py
