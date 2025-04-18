@@ -1,1 +1,0 @@
-python GRU/GRUwithprompt.py
